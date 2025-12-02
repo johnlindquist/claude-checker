@@ -6,8 +6,6 @@
       "name": "claude-checker",
       "devDependencies": {
         "@types/bun": "latest",
-      },
-      "peerDependencies": {
         "typescript": "^5",
       },
     },

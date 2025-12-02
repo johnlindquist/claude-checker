@@ -2,18 +2,24 @@
 // src/index.ts
 
 import { spawn } from "bun";
+import { resolve } from "node:path";
+import { homedir } from "node:os";
 import { buildJudgePrompt, DEFAULT_PREFERENCES } from "./prompts";
 import type { TestConfig } from "./types";
 
 async function main() {
-  const args = parseArgs(process.argv.slice(2));
+  const { flags, positional } = parseArgs(process.argv.slice(2));
+  const userPrompt = positional[0] || "Please execute judgment";
 
   // Handle --help
-  if (args.help || args.h) {
+  if (flags.help || flags.h) {
     console.log(`
 claude-checker - Test your CLAUDE.md behavioral compliance
 
-Usage: claude-checker [options]
+Usage: claude-checker [prompt] [options]
+
+Arguments:
+  prompt                  Initial prompt to start evaluation (default: "Please execute judgment")
 
 Options:
   --claude-md <path>      Path to CLAUDE.md (default: ~/.claude/CLAUDE.md)
@@ -24,19 +30,23 @@ Options:
   --help                  Show this help
 
 Examples:
-  claude-checker                           # Test ~/.claude/CLAUDE.md
-  claude-checker --source project          # Test ./.claude/CLAUDE.md
-  claude-checker --model sonnet            # Use Sonnet (cheaper) as judge
-  claude-checker --preferences prefs.json  # Use custom preferences
+  claude-checker "Please execute judgment"           # Start with custom prompt
+  claude-checker --source project                    # Test ./.claude/CLAUDE.md
+  claude-checker "Begin" --model sonnet              # Use Sonnet (cheaper) as judge
+  claude-checker --preferences prefs.json            # Use custom preferences
 `);
     process.exit(0);
   }
 
+  // Resolve to absolute path to avoid issues with spawned processes
+  const rawPath = flags.claudeMd || flags.claudemd || `${homedir()}/.claude/CLAUDE.md`;
+  const claudeMdPath = resolve(rawPath);
+
   const config: TestConfig = {
-    claudeMdPath: args.claudeMd || args.claudemd || `${process.env.HOME}/.claude/CLAUDE.md`,
-    settingSource: (args.source as "user" | "project") || "user",
-    model: args.model || "opus",
-    tasksPerPreference: Number(args.tasks) || 3,
+    claudeMdPath,
+    settingSource: (flags.source as "user" | "project") || "user",
+    model: flags.model || "opus",
+    tasksPerPreference: Number(flags.tasks) || 3,
   };
 
   // Verify CLAUDE.md exists
@@ -49,8 +59,8 @@ Examples:
 
   // Load custom preferences or use defaults
   let preferences = DEFAULT_PREFERENCES;
-  if (args.preferences) {
-    const customPrefs = await Bun.file(args.preferences).json();
+  if (flags.preferences) {
+    const customPrefs = await Bun.file(flags.preferences).json();
     preferences = customPrefs.preferences;
   }
 
@@ -75,6 +85,7 @@ Examples:
   const proc = spawn({
     cmd: [
       "claude",
+      userPrompt,
       "--model", config.model,
       "--setting-sources", "",
       "--strict-mcp-config",
@@ -90,24 +101,32 @@ Examples:
   process.exit(exitCode);
 }
 
-function parseArgs(args: string[]): Record<string, string> {
-  const result: Record<string, string> = {};
+interface ParsedArgs {
+  flags: Record<string, string>;
+  positional: string[];
+}
+
+function parseArgs(args: string[]): ParsedArgs {
+  const flags: Record<string, string> = {};
+  const positional: string[] = [];
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg.startsWith("--")) {
       const key = arg.slice(2).replace(/-/g, "");
       if (args[i + 1] && !args[i + 1].startsWith("--")) {
-        result[key] = args[++i];
+        flags[key] = args[++i];
       } else {
-        result[key] = "true";
+        flags[key] = "true";
       }
     } else if (arg.startsWith("-") && arg.length === 2) {
-      result[arg.slice(1)] = "true";
+      flags[arg.slice(1)] = "true";
+    } else {
+      positional.push(arg);
     }
   }
 
-  return result;
+  return { flags, positional };
 }
 
 main().catch(console.error);
